@@ -18,7 +18,7 @@
 int main(){
 	int fd, file_size;
 	ssize_t ret;
-	char file_content[200] = "", target_file[100], final[200];
+	char file_content[200] = "", aux[200], target_file[100], final[200];
 
 	// Get the name of the target file to encrypt and save the content
 	printf("[+] Enter the file name to encrypt: ");

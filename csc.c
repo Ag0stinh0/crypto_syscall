@@ -41,36 +41,38 @@ asmlinkage ssize_t sys_write_crypt (int fd, void *buf, size_t nbytes){ // 333
 	int byte_count;
 	char* encrypted;
 	char* plaintext;
+	char* buf_copy;
 	size_t final_size, ret;
 	mm_segment_t fs;
 
 	final_size = AES_BLOCK_SIZE * ((nbytes - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
 	printk(KERN_INFO "Crypto_Syscall: fd=%d size=%d total=%d\n",fd,(int)nbytes,final_size);
 
-	encrypted = (char*) vmalloc(size_final_block);
-	plaintext = (char*) vmalloc(size_final_block);
+	buf_copy = (char*) buf;
+	for (byte_count = 0; byte_count < nbytes; byte_count++)
+		plaintext[byte_count] = buf_copy[byte_count];
+	for (/* PADDING */; byte_count < final_size; byte_count++)
+		plaintext[byte_count] = 0;
+
+	encrypted = (char*) vmalloc(final_size);
+	plaintext = (char*) vmalloc(final_size);
 	fs = get_fs();
 	set_fs(KERNEL_DS);
-
-	for (byte_count = 0; byte_count < nbytes; byte_count++)
-		plaintext[byte_count] = buf[byte_count];
-	for (/* PADDING */; byte_count < size_final_block; byte_count++)
-		plaintext[byte_count] = 0;
 
 	ret = cipherOperation(plaintext, encrypted, size_final_block, 1);
 	if (ret)
 		goto out;
 
-	sys_write(fd, encrypted, size_final_block);
-
+	sys_write(fd, encrypted, final_size);
+	set_fs(fs);
 out:
 	if (encrypted != NULL)
 		vfree(encrypted);
 	if (plaintext != NULL)
 		vfree(plaintext);
 
-	set_fs(fs);
-	return ret_file;
+
+	return ret;
 }
 
 
@@ -79,6 +81,7 @@ asmlinkage ssize_t sys_read_crypt(int fd, void *buf, size_t nbytes){ //334
 	int byte_count;
 	char* buf_crypt;
 	char* plaintext;
+	char* buf_copy;
 	size_t final_size, ret;
 	mm_segment_t fs;
 
@@ -89,18 +92,18 @@ asmlinkage ssize_t sys_read_crypt(int fd, void *buf, size_t nbytes){ //334
 	plaintext = (char*) vmalloc(nbytes);
 	fs = get_fs();
 	set_fs(KERNEL_DS);
-	sys_read(fd, buf_crypt, size_final_block);
+	sys_read(fd, buf_crypt, final_size);
 	ret = cipherOperation(plaintext, buf_crypt, final_size, 2);
 	if (ret)
 		goto out;
 
 	for (byte_count = 0; byte_count < nbytes; byte_count++)
-		buf[byte_count] = plaintext[byte_count];
+		(char*) buf[byte_count] = plaintext[byte_count];
 
 out:
 	vfree(buf_crypt);
 	set_fs(fs);
-	return ret_file;
+	return ret;
 }
 
 
