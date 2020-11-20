@@ -16,19 +16,23 @@
 #include <sys/stat.h>
 
 int main(){
-	int fd;
+	int fd, file_size;
 	ssize_t ret;
-	char file_content[200] = "", aux[200], target_file[100], secret_string[3200], final[200];
-	
+	char file_content[200] = "", target_file[100], final[200];
+
 	// Get the name of the target file to encrypt and save the content
-	printf("Enter the file name to encrypt: ");
-	scanf("%[^\n]", target_file);	
+	printf("[+] Enter the file name to encrypt: ");
+	scanf("%[^\n]", target_file);
 	fd = open(target_file, O_RDONLY, 0666);
 	while(read(fd, aux, sizeof(char))){
 		strcat(file_content,aux);
 	}
 	close(fd);
-	
+
+	printf("[~] Reading file...\n");
+	file_size = strlen(file_content);
+
+	printf("[+] Calling Write Crypt\n");
 	// create the secret file and use the sycall to store the cypher content
 	fd = open("secret_file.txt", O_WRONLY|O_CREAT, 0666);
 	ret = syscall(333, fd, file_content, strlen(file_content));
@@ -37,16 +41,9 @@ int main(){
 		return -1;
 	}
 	close(fd);
-	
-	// open this file and check the cipher content
-	fd = open("secret_file.txt", O_RDONLY|O_CREAT, 0666);
-	strcpy(aux,"");
-	while(read(fd, aux, sizeof(char))){
-		strcat(secret_string,aux);
-	}
-	printf("Secret file: %s", secret_string);
-	close(fd);
-	
+
+	printf("[!] Secret File created\n");
+	printf("[~] Calling Read Crypt\n");
 	// use syscall to decypher the content and print
 	fd = open("secret_file.txt", O_RDONLY|O_CREAT, 0666);
 	ret = syscall(334, fd, final, strlen(file_content));
@@ -54,6 +51,6 @@ int main(){
 		printf("Operation Write Failed\n");
 		return -1;
 	}
-	printf("Decrypted file: %s\n", final);
+	printf("[*] Decrypted file Content: %s\n", final);
 	return 0;
 }

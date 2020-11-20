@@ -15,7 +15,6 @@
 #include <linux/mutex.h>   /// Required for the mutex functionality
 #include <linux/scatterlist.h>
 #include <linux/crypto.h>
-//#include <crypto/internal/hash.h> // Maybe
 #include <crypto/hash.h>
 #include <crypto/skcipher.h>
 #include <linux/err.h>
@@ -39,47 +38,37 @@ static char *key = "0123456789ABCDEF";
 int cipherOperation(char *plaintext, char *encrypted, int nbytes, int option);
 
 asmlinkage ssize_t sys_write_crypt (int fd, void *buf, size_t nbytes){ // 333
-	int buffer_ptr, byte_count, ret_cypher;
-	char* crypt_buf;
-	char* plaintext;
+	int byte_count;
 	char* encrypted;
-	size_t size_final_block, ret_file;
+	char* plaintext;
+	size_t final_size, ret;
 	mm_segment_t fs;
-	
-	printk(KERN_INFO "Crypto_Syscall: fd=%d size=%d\n",fd,(int)nbytes);
-	
-	crypt_buf = (char*) buf;
-	buffer_ptr = 0;
-	ret_file = 0;
- 	size_final_block = AES_BLOCK_SIZE * ((nbytes - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
-	
-	encrypted = NULL;
-	plaintext = (char*) vmalloc(size_final_block);
+
+	final_size = AES_BLOCK_SIZE * ((nbytes - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
+	printk(KERN_INFO "Crypto_Syscall: fd=%d size=%d total=%d\n",fd,(int)nbytes,final_size);
+
 	encrypted = (char*) vmalloc(size_final_block);
-	
-	
+	plaintext = (char*) vmalloc(size_final_block);
 	fs = get_fs();
 	set_fs(KERNEL_DS);
-	
+
 	for (byte_count = 0; byte_count < nbytes; byte_count++)
-		plaintext[byte_count] = crypt_buf[byte_count + buffer_ptr];
-	for (byte_count = byte_count; byte_count < size_final_block; byte_count++)
+		plaintext[byte_count] = buf[byte_count];
+	for (/* PADDING */; byte_count < size_final_block; byte_count++)
 		plaintext[byte_count] = 0;
-		
-	ret_cypher = cipherOperation(plaintext, encrypted, size_final_block, 1);
-	if (ret_cypher)
+
+	ret = cipherOperation(plaintext, encrypted, size_final_block, 1);
+	if (ret)
 		goto out;
-	
-	ret_file += sys_write(fd, encrypted, size_final_block);
-	
-	buffer_ptr += nbytes;
-	
+
+	sys_write(fd, encrypted, size_final_block);
+
 out:
 	if (encrypted != NULL)
 		vfree(encrypted);
 	if (plaintext != NULL)
 		vfree(plaintext);
-		
+
 	set_fs(fs);
 	return ret_file;
 }
@@ -87,122 +76,109 @@ out:
 
 
 asmlinkage ssize_t sys_read_crypt(int fd, void *buf, size_t nbytes){ //334
-	int buffer_ptr, byte_count, ret_cypher;
-	char* crypt_buf;
-	char* decrypted;
-	char* encrypted;
-	size_t size_final_block, ret_file;
+	int byte_count;
+	char* buf_crypt;
+	char* plaintext;
+	size_t final_size, ret;
 	mm_segment_t fs;
-	
-	printk(KERN_INFO "Crypto_Syscall: fd=%d size=%d\n",fd,(int)nbytes);
-	
-	crypt_buf = (char*) buf;
-	buffer_ptr = 0;
-	ret_file = 0;
- 	size_final_block = AES_BLOCK_SIZE * ((nbytes - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
- 	
- 	fs = get_fs();
- 	set_fs(KERNEL_DS);
- 	
- 	decrypted = NULL;
-	decrypted = (char*) vmalloc(size_final_block);
-	encrypted = (char*) vmalloc(size_final_block);
-	
-	ret_cypher = cipherOperation(decrypted, encrypted, size_final_block, 2);
-	if (ret_cypher)
+
+	final_size = AES_BLOCK_SIZE * ((nbytes - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
+	printk(KERN_INFO "Crypto_Syscall: fd=%d size=%d total=%d\n",fd,(int)nbytes,final_size);
+
+	buf_crypt = (char*) vmalloc(final_size);
+	plaintext = (char*) vmalloc(nbytes);
+	fs = get_fs();
+	set_fs(KERNEL_DS);
+	sys_read(fd, buf_crypt, size_final_block);
+	ret = cipherOperation(plaintext, buf_crypt, final_size, 2);
+	if (ret)
 		goto out;
-		
+
 	for (byte_count = 0; byte_count < nbytes; byte_count++)
-		crypt_buf[byte_count + buffer_ptr] = decrypted[byte_count];
-	
-	buffer_ptr += nbytes;
-	
+		buf[byte_count] = plaintext[byte_count];
+
 out:
-	if (encrypted != NULL)
-		vfree(encrypted);
-	if (decrypted != NULL)
-		vfree(decrypted);
-		
+	vfree(buf_crypt);
 	set_fs(fs);
 	return ret_file;
 }
 
 
-int cipherOperation(char *plaintext, char *encrypted, int nbytes, int option)  
-{     
+int cipherOperation(char *plaintext, char *encrypted, int nbytes, int option)
+{
     printk(KERN_INFO "Crypto_Syscall: Encrypt function\n");
     struct crypto_skcipher *skcipher = NULL;
     struct skcipher_request *skcipher_req = NULL;
-    
+
     struct scatterlist scatter_plaintext;
     struct scatterlist scatter_crypt;
     char *crypt_result = NULL;
     char *result_data = NULL;
-    
+
     char *local_key = NULL;
     char *aux;
-    
+
     int ret = -EFAULT;
     int i;
-    
+
     skcipher = crypto_alloc_skcipher("ecb(aes)", 0,0);
     if (IS_ERR(skcipher)){
     	printk(KERN_INFO "Crypto_Syscall: ERROR - Failed to allocate skcipher\n");
     	return PTR_ERR(skcipher);
     	goto out;
     }
-    
+
     skcipher_req = skcipher_request_alloc(skcipher, GFP_KERNEL);
     if (!skcipher_req){
     	printk(KERN_INFO "Crypto_Syscall: ERROR - Failed to request skcipher\n");
     	ret = -ENOMEM;
     	goto out;
     }
-    
+
     local_key = vmalloc(AES_KEY_SIZE);
     if (!local_key){
     	printk(KERN_INFO "Crypto_Syscall: ERROR - Failed to allocate key\n");
     	goto out;
     }
-    
+
     for (i = 0; i<AES_KEY_SIZE; i++)
     	local_key[i] = key[i];
- 	
- 	
+
+
  	ret = crypto_skcipher_setkey(skcipher, local_key, AES_KEY_SIZE);
  	if (ret){
  		printk(KERN_INFO "Crypto_Syscall: ERROR - Failed to set key\n");
     	ret = -EAGAIN;
     	goto out;
  	}
- 	
+
  	crypt_result = vmalloc(nbytes);
  	if (!crypt_result){
  		printk(KERN_INFO "Crypto_Syscall: ERROR - Failed to allocate crypt_result\n");
     	goto out;
  	}
- 	
+
  	if (option == 1){
  		sg_init_one(&scatter_plaintext, plaintext, nbytes);
  		sg_init_one(&scatter_crypt, crypt_result, nbytes);
- 		
+
  		skcipher_request_set_crypt(skcipher_req, &scatter_plaintext, &scatter_crypt, nbytes, NULL);
- 		
+
  		ret = crypto_skcipher_encrypt(skcipher_req);
  	} else if (option == 2){
  		sg_init_one(&scatter_plaintext, crypt_result, nbytes);
  		sg_init_one(&scatter_crypt, encrypted, nbytes);
- 		
+
  		skcipher_request_set_crypt(skcipher_req, &scatter_crypt, &scatter_plaintext, nbytes, NULL);
- 		
+
  		ret = crypto_skcipher_encrypt(skcipher_req);
  	}
- 	
+
  	if (ret){
  		printk(KERN_INFO "Crypto_Syscall: ERROR - Cypher Operation failed\n");
     	goto out;
  	}
- 	
+
  	if (option == 1){
  		result_data = sg_virt(&scatter_crypt);
  		for(i = 0; i < nbytes; i++)
@@ -212,15 +188,9 @@ int cipherOperation(char *plaintext, char *encrypted, int nbytes, int option)
  		for(i = 0; i < nbytes; i++)
  			plaintext[i] = result_data[i];
  	}
- 	
- 	printk(KERN_INFO "Crypto_Syscall: RESULT - ");
- 	aux = result_data;
-	while (nbytes--){
-		printk(KERN_INFO "%02x ", *aux);
-		aux++;
-	}
-	printk(KERN_INFO "\n");
-	
+
+ 	printk(KERN_INFO "Crypto_Syscall: DONE Operation: %d\n", option);
+
 out:
 	if (skcipher)
         crypto_free_skcipher(skcipher);
@@ -230,6 +200,6 @@ out:
     	vfree(local_key);
     if (crypt_result)
         vfree(crypt_result);
-        
+
     return ret;
 }
