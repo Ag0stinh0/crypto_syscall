@@ -37,7 +37,7 @@ static char *key = "0123456789ABCDEF";
 static void printHex(unsigned char *, unsigned int);
 static int cipherOperation(char *, int, char *, int option);
 
-asmlinkage ssize_t sys_write_crypt(int fd, void *buf, size_t size)
+asmlinkage ssize_t sys_write_crypt(int fd, const void *buf, size_t nbytes)
 {
 	char* buf_copy;
 	int byte_count;
@@ -50,12 +50,12 @@ asmlinkage ssize_t sys_write_crypt(int fd, void *buf, size_t size)
 
 	ret = 0;
 	buf_copy = (char*)buf;
-	final_block_size = AES_BLOCK_SIZE * ((size - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
+	final_block_size = AES_BLOCK_SIZE * ((nbytes - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
 
-	printk(KERN_INFO "Crypto_Syscall: Params fd=%d, size=%d, total=%d\n", fd, (int)size, final_block_size);
+	printk(KERN_INFO "Crypto_Syscall: Params fd=%d, size=%d, total=%d\n", fd, (int)nbytes, final_block_size);
 
 	if (fd < 0) return fd;
-	if (size <= 0) return size;
+	if (nbytes <= 0) return nbytes;
 
     fs = get_fs();
     set_fs(KERNEL_DS);
@@ -68,7 +68,7 @@ asmlinkage ssize_t sys_write_crypt(int fd, void *buf, size_t size)
 	if (encrypted == NULL) goto out;
 
     printk(KERN_INFO "Crypto_Syscall: Copying buffer\n");
-    for (byte_count = 0; byte_count < size;byte_count++) plaintext[byte_count] = buf_copy[byte_count];
+    for (byte_count = 0; byte_count < nbytes;byte_count++) plaintext[byte_count] = buf_copy[byte_count];
     for (/*PADDING*/;byte_count < final_block_size; byte_count++) plaintext[byte_count] = 0;
 
     printk(KERN_INFO "Crypto_Syscall: Start encryption\n");
@@ -86,7 +86,7 @@ out:
     return ret;
 }
 
-asmlinkage ssize_t sys_read_crypt(int fd, void *buf, size_t size)
+asmlinkage ssize_t sys_read_crypt(int fd, const void *buf, size_t nbytes)
 {
 	char* buf_copy;
 	int byte_count;
@@ -99,12 +99,12 @@ asmlinkage ssize_t sys_read_crypt(int fd, void *buf, size_t size)
 
 	ret = 0;
 	buf_copy = (char*)buf;
-	final_block_size = AES_BLOCK_SIZE * ((size - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
+	final_block_size = AES_BLOCK_SIZE * ((nbytes - 1) / AES_BLOCK_SIZE) + AES_BLOCK_SIZE;
 
-	printk(KERN_INFO "Crypto_Syscall: Params fd=%d, size=%d, total=%d\n", fd, (int)size,final_block_size);
+	printk(KERN_INFO "Crypto_Syscall: Params fd=%d, size=%d, total=%d\n", fd, (int)nbytes,final_block_size);
 
 	if (fd < 0) return fd;
-	if (size <= 0) return size;
+	if (nbytes <= 0) return nbytes;
 
 	fs = get_fs();
 	set_fs(KERNEL_DS);
@@ -126,7 +126,7 @@ asmlinkage ssize_t sys_read_crypt(int fd, void *buf, size_t size)
     if (cipher_ret) { goto out; }
 
     printk(KERN_INFO "Crypto_Syscall: Copying buffer\n");
-    for (byte_count = 0; byte_count < size; byte_count++) buf_copy[byte_count] = plaintext[byte_count];
+    for (byte_count = 0; byte_count < nbytes; byte_count++) buf_copy[byte_count] = plaintext[byte_count];
 
     ret += sys_ret;
 
